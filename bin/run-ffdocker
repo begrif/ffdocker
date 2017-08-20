@@ -1,0 +1,95 @@
+#!/bin/sh
+# As of March 29 2016
+#   reasonably well tested
+#   uses special docker profile
+#     in $HOME/.mozilla/firefox/profiles.ini
+#       [Profile2]
+#       Name=docker
+#       IsRelative=1
+#       Path=ws6fynqr.docker
+#
+#  EDIT profiles.ini and create / chown directory before running
+#	user 8080 group 1000
+#
+#   and configure for permanent private window setting
+
+# My docker base directory. Yours may vary.
+dir=$HOME/docker/
+
+create_downloads () {
+  dl=/tmp/downloads
+
+  mkdir $dl
+  chmod 777 $dl
+}
+
+case "X$1" in
+    Xbuild)
+           cd $dir
+           if [ ! -d ffdocker ] ; then
+             echo "$0: did not find ffdocker directory"
+             exit 2
+           fi
+           # remove last ffdocker
+           docker rmi ffdocker
+           # build a new one
+           docker build -t ffdocker ffdocker
+           ;;
+
+    Xclean*up) # remove old "exited" containers
+           IDs=$(docker ps -f status=exited | grep ffdocker | cut -f 1 -d ' ')
+           if [ "X$IDs" != X ] ; then
+             docker rm $IDs
+           fi
+           ;;
+
+    Xps) 
+           docker ps -a
+           ;;
+
+    Xrun)
+           local=$(xhost | grep -i ^local)
+           if [ "X$local" = X ] ; then
+             xhost +local:docker
+           fi
+
+           if [ ! -d /tmp/downloads ] ; then
+             create_downloads
+           fi
+
+           shift
+
+           # --rm               auto remove image
+           # -i                 interactive
+           # -t                 allocate tty
+           # --net host         add networking
+           # -e                 environment to pass
+           # -v                 add volumes   HOST:GUEST
+           #            X11-unix: X11 socket directory
+           #            downloads: shared file exchange
+           #            .mozilla: profile.ini and profile dir
+           #            firefox to run: /usr/lib/firefox-latest/firefox
+           #               is entrypoint of container
+           docker run --rm -it --net host \
+                -e DISPLAY="$DISPLAY" -e LANG="$LANG" \
+                -v /tmp/.X11-unix:/tmp/.X11-unix \
+                -v /tmp/downloads:/firefox/Downloads \
+                -v $HOME/.mozilla:/firefox/.mozilla \
+                -v /usr/lib/firefox-55:/usr/lib/firefox-latest:ro \
+                --name Firefox \
+                ffdocker $@
+           ;;
+
+
+    X*) echo "$0: usage"
+        echo "  run-ffdocker run [ options ]"
+        echo "	  Run containerized Firefox with options, eg a URL"
+        echo "  run-ffdocker cleanup 	[ or 'clean-up' ]"
+        echo "	  Remove container from previous run."
+        echo "  run-ffdocker ps"
+        echo "	Docker 'ps' (general docker command)"
+        echo "  run-ffdocker build"
+        echo "	  Recompile container based on config in $dir"
+        ;;
+esac
+
